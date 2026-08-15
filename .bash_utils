@@ -1,0 +1,825 @@
+# ~/.bash_utils
+# =============================================================================
+# Bash Utilities v1.1
+# =============================================================================
+
+
+# =============================================================================
+# Internal Utility Infrastructure
+# =============================================================================
+
+declare -A _BASH_UTIL_DESCRIPTIONS
+declare -A _BASH_UTIL_USAGE
+declare -A _BASH_UTIL_CATEGORY
+declare -a _BASH_UTIL_NAMES
+
+
+_registerUtil() {
+    if [[ $# -ne 4 ]]; then
+        echo "ERROR: _registerUtil requires <name> <usage> <description> <category>." >&2
+        return 1
+    fi
+
+    local name="$1"
+    local usage="$2"
+    local description="$3"
+    local category="$4"
+
+    _BASH_UTIL_NAMES+=("$name")
+    _BASH_UTIL_USAGE["$name"]="$usage"
+    _BASH_UTIL_DESCRIPTIONS["$name"]="$description"
+    _BASH_UTIL_CATEGORY["$name"]="$category"
+}
+
+
+_requireCommand() {
+    if [[ $# -ne 1 ]]; then
+        echo "ERROR: _requireCommand requires exactly one argument." >&2
+        return 1
+    fi
+
+    if ! command -v "$1" &>/dev/null; then
+        echo "ERROR: Required command not found: $1" >&2
+        return 1
+    fi
+}
+
+
+_requireGitRepo() {
+    _requireCommand git || return 1
+
+    if ! git rev-parse --is-inside-work-tree &>/dev/null; then
+        echo "ERROR: Not inside a Git working tree." >&2
+        return 1
+    fi
+}
+
+
+# =============================================================================
+# Utility Discovery
+# =============================================================================
+
+utils() {
+    if [[ $# -gt 1 ]]; then
+        echo "USAGE: utils [utility]" >&2
+        return 1
+    fi
+
+    if [[ $# -eq 1 ]]; then
+        local name="$1"
+
+        if [[ -z "${_BASH_UTIL_USAGE[$name]+x}" ]]; then
+            echo "ERROR: Unknown utility: $name" >&2
+            echo "USAGE: utils [utility]" >&2
+            return 1
+        fi
+
+        printf '%s\n' "$name"
+        printf '  %s\n\n' "${_BASH_UTIL_DESCRIPTIONS[$name]}"
+        printf 'USAGE:\n'
+        printf '  %s\n' "${_BASH_UTIL_USAGE[$name]}"
+        return 0
+    fi
+
+    local -a categories=(
+        "PATH"
+        "Files / Directories"
+        "Find / Replace"
+        "Archives"
+        "Git"
+        "Meta"
+    )
+
+    local category
+    local name
+
+    printf 'Bash Utilities v1.1\n'
+    printf '===================\n'
+
+    for category in "${categories[@]}"; do
+        printf '\n%s\n' "$category"
+
+        for name in "${_BASH_UTIL_NAMES[@]}"; do
+            [[ "${_BASH_UTIL_CATEGORY[$name]}" != "$category" ]] && continue
+
+            printf '  %-30s %s\n' \
+                "$name" \
+                "${_BASH_UTIL_DESCRIPTIONS[$name]}"
+        done
+    done
+
+    printf '\nUse: utils <utility> for usage details.\n'
+}
+
+_registerUtil \
+    "utils" \
+    "utils [utility]" \
+    "List available Bash utilities or show help for one utility." \
+    "Meta"
+
+
+# =============================================================================
+# PATH Utilities
+# =============================================================================
+
+removeFromPath() {
+    if [[ $# -ne 1 ]]; then
+        echo "USAGE: removeFromPath <directory>" >&2
+        return 1
+    fi
+
+    local remove="${1%/}"
+    local new_path=""
+    local entry
+    local -a entries
+
+    IFS=':' read -ra entries <<< "$PATH"
+
+    for entry in "${entries[@]}"; do
+        [[ "${entry%/}" == "$remove" ]] && continue
+        new_path="${new_path:+$new_path:}$entry"
+    done
+
+    PATH="$new_path"
+    export PATH
+}
+
+_registerUtil \
+    "removeFromPath" \
+    "removeFromPath <directory>" \
+    "Remove all occurrences of a directory from PATH." \
+    "PATH"
+
+
+prependToPath() {
+    if [[ $# -ne 1 ]]; then
+        echo "USAGE: prependToPath <directory>" >&2
+        return 1
+    fi
+
+    local dir="${1%/}"
+
+    if [[ ! -d "$dir" ]]; then
+        echo "ERROR: Directory not found: $dir" >&2
+        echo "USAGE: prependToPath <directory>" >&2
+        return 1
+    fi
+
+    removeFromPath "$dir" || return 1
+
+    PATH="$dir${PATH:+:$PATH}"
+    export PATH
+}
+
+_registerUtil \
+    "prependToPath" \
+    "prependToPath <directory>" \
+    "Prepend a directory to PATH without creating duplicates." \
+    "PATH"
+
+
+appendToPath() {
+    if [[ $# -ne 1 ]]; then
+        echo "USAGE: appendToPath <directory>" >&2
+        return 1
+    fi
+
+    local dir="${1%/}"
+
+    if [[ ! -d "$dir" ]]; then
+        echo "ERROR: Directory not found: $dir" >&2
+        echo "USAGE: appendToPath <directory>" >&2
+        return 1
+    fi
+
+    removeFromPath "$dir" || return 1
+
+    PATH="${PATH:+$PATH:}$dir"
+    export PATH
+}
+
+_registerUtil \
+    "appendToPath" \
+    "appendToPath <directory>" \
+    "Append a directory to PATH without creating duplicates." \
+    "PATH"
+
+
+pathLines() {
+    if [[ $# -ne 0 ]]; then
+        echo "USAGE: pathLines" >&2
+        return 1
+    fi
+
+    tr ':' '\n' <<< "$PATH"
+}
+
+_registerUtil \
+    "pathLines" \
+    "pathLines" \
+    "Display PATH with one directory per line." \
+    "PATH"
+
+
+# =============================================================================
+# File / Directory Utilities
+# =============================================================================
+
+mkcd() {
+    if [[ $# -ne 1 ]]; then
+        echo "USAGE: mkcd <directory>" >&2
+        return 1
+    fi
+
+    mkdir -p -- "$1" &&
+        cd -- "$1"
+}
+
+_registerUtil \
+    "mkcd" \
+    "mkcd <directory>" \
+    "Create a directory and change into it." \
+    "Files / Directories"
+
+
+backup() {
+    if [[ $# -ne 1 ]]; then
+        echo "USAGE: backup <file|directory>" >&2
+        return 1
+    fi
+
+    if [[ ! -e "$1" ]]; then
+        echo "ERROR: Not found: $1" >&2
+        echo "USAGE: backup <file|directory>" >&2
+        return 1
+    fi
+
+    cp -a -- "$1" "$1.bak"
+}
+
+_registerUtil \
+    "backup" \
+    "backup <file|directory>" \
+    "Create a .bak copy of a file or directory." \
+    "Files / Directories"
+
+
+sizeof() {
+    if [[ $# -lt 1 ]]; then
+        echo "USAGE: sizeof <file|directory> [...]" >&2
+        return 1
+    fi
+
+    du -sh -- "$@"
+}
+
+_registerUtil \
+    "sizeof" \
+    "sizeof <file|directory> [...]" \
+    "Display human-readable sizes for files or directories." \
+    "Files / Directories"
+
+
+whichall() {
+    if [[ $# -ne 1 ]]; then
+        echo "USAGE: whichall <command>" >&2
+        return 1
+    fi
+
+    type -a "$1"
+}
+
+_registerUtil \
+    "whichall" \
+    "whichall <command>" \
+    "Display all known definitions or locations for a command." \
+    "Files / Directories"
+
+
+# =============================================================================
+# Find / Replace Utilities
+# =============================================================================
+
+replaceInFile() {
+    if [[ $# -ne 3 ]]; then
+        echo "USAGE: replaceInFile <search> <replacement> <file>" >&2
+        return 1
+    fi
+
+    local search="$1"
+    local replacement="$2"
+    local file="$3"
+
+    if [[ -z "$search" ]]; then
+        echo "ERROR: Search string cannot be empty." >&2
+        echo "USAGE: replaceInFile <search> <replacement> <file>" >&2
+        return 1
+    fi
+
+    if [[ ! -f "$file" ]]; then
+        echo "ERROR: File not found: $file" >&2
+        echo "USAGE: replaceInFile <search> <replacement> <file>" >&2
+        return 1
+    fi
+
+    # A .bak copy is retained before modification.
+    sed -i.bak "s|$search|$replacement|g" "$file"
+}
+
+_registerUtil \
+    "replaceInFile" \
+    "replaceInFile <search> <replacement> <file>" \
+    "Replace text in one file while retaining a .bak copy." \
+    "Find / Replace"
+
+
+replaceInFilesRecursive() {
+    if [[ $# -lt 2 || $# -gt 3 ]]; then
+        echo "USAGE: replaceInFilesRecursive <search> <replacement> [file-pattern]" >&2
+        return 1
+    fi
+
+    local search="$1"
+    local replacement="$2"
+    local pattern="${3:-*}"
+
+    if [[ -z "$search" ]]; then
+        echo "ERROR: Search string cannot be empty." >&2
+        echo "USAGE: replaceInFilesRecursive <search> <replacement> [file-pattern]" >&2
+        return 1
+    fi
+
+    # Example:
+    #
+    #   replaceInFilesRecursive 'foo' 'bar' '*.cpp'
+    #
+    # Every modified file receives a .bak copy.
+    find . -type f -name "$pattern" -print0 |
+        xargs -0 -r sed -i.bak "s|$search|$replacement|g"
+}
+
+_registerUtil \
+    "replaceInFilesRecursive" \
+    "replaceInFilesRecursive <search> <replacement> [file-pattern]" \
+    "Recursively replace text while retaining .bak copies." \
+    "Find / Replace"
+
+
+# =============================================================================
+# Archive Utilities
+# =============================================================================
+
+zipdir() {
+    if [[ $# -ne 1 ]]; then
+        echo "USAGE: zipdir <directory>" >&2
+        return 1
+    fi
+
+    _requireCommand zip || return 1
+
+    local dir="${1%/}"
+
+    if [[ ! -d "$dir" ]]; then
+        echo "ERROR: Directory not found: $dir" >&2
+        echo "USAGE: zipdir <directory>" >&2
+        return 1
+    fi
+
+    zip -r "${dir}.zip" "$dir"
+}
+
+_registerUtil \
+    "zipdir" \
+    "zipdir <directory>" \
+    "Create a ZIP archive from a directory." \
+    "Archives"
+
+
+unzipToDir() {
+    if [[ $# -ne 1 ]]; then
+        echo "USAGE: unzipToDir <archive.zip>" >&2
+        return 1
+    fi
+
+    _requireCommand unzip || return 1
+
+    local archive="$1"
+
+    if [[ ! -f "$archive" ]]; then
+        echo "ERROR: Archive not found: $archive" >&2
+        echo "USAGE: unzipToDir <archive.zip>" >&2
+        return 1
+    fi
+
+    if [[ "$archive" != *.zip ]]; then
+        echo "ERROR: Expected a .zip archive: $archive" >&2
+        echo "USAGE: unzipToDir <archive.zip>" >&2
+        return 1
+    fi
+
+    local dir="${archive%.zip}"
+
+    mkdir -p -- "$dir" &&
+        unzip "$archive" -d "$dir"
+}
+
+_registerUtil \
+    "unzipToDir" \
+    "unzipToDir <archive.zip>" \
+    "Extract a ZIP archive into a matching directory." \
+    "Archives"
+
+
+targz() {
+    if [[ $# -ne 1 ]]; then
+        echo "USAGE: targz <file|directory>" >&2
+        return 1
+    fi
+
+    _requireCommand tar || return 1
+
+    local target="${1%/}"
+
+    if [[ ! -e "$target" ]]; then
+        echo "ERROR: Not found: $target" >&2
+        echo "USAGE: targz <file|directory>" >&2
+        return 1
+    fi
+
+    tar -czf "${target}.tar.gz" "$target"
+}
+
+_registerUtil \
+    "targz" \
+    "targz <file|directory>" \
+    "Create a gzip-compressed tar archive." \
+    "Archives"
+
+
+untargz() {
+    if [[ $# -ne 1 ]]; then
+        echo "USAGE: untargz <archive.tar.gz|archive.tgz>" >&2
+        return 1
+    fi
+
+    _requireCommand tar || return 1
+
+    local archive="$1"
+
+    if [[ ! -f "$archive" ]]; then
+        echo "ERROR: Archive not found: $archive" >&2
+        echo "USAGE: untargz <archive.tar.gz|archive.tgz>" >&2
+        return 1
+    fi
+
+    case "$archive" in
+        *.tar.gz|*.tgz)
+            tar -xzf "$archive"
+            ;;
+        *)
+            echo "ERROR: Expected a .tar.gz or .tgz archive: $archive" >&2
+            echo "USAGE: untargz <archive.tar.gz|archive.tgz>" >&2
+            return 1
+            ;;
+    esac
+}
+
+_registerUtil \
+    "untargz" \
+    "untargz <archive.tar.gz|archive.tgz>" \
+    "Extract a gzip-compressed tar archive." \
+    "Archives"
+
+
+extract() {
+    if [[ $# -ne 1 ]]; then
+        echo "USAGE: extract <archive>" >&2
+        return 1
+    fi
+
+    local archive="$1"
+
+    if [[ ! -f "$archive" ]]; then
+        echo "ERROR: Archive not found: $archive" >&2
+        echo "USAGE: extract <archive>" >&2
+        return 1
+    fi
+
+    case "$archive" in
+        *.tar.gz|*.tgz)
+            _requireCommand tar || return 1
+            tar -xzf "$archive"
+            ;;
+
+        *.tar.bz2)
+            _requireCommand tar || return 1
+            tar -xjf "$archive"
+            ;;
+
+        *.tar.xz)
+            _requireCommand tar || return 1
+            tar -xJf "$archive"
+            ;;
+
+        *.tar)
+            _requireCommand tar || return 1
+            tar -xf "$archive"
+            ;;
+
+        *.zip)
+            _requireCommand unzip || return 1
+            unzip "$archive"
+            ;;
+
+        *.gz)
+            _requireCommand gunzip || return 1
+            gunzip "$archive"
+            ;;
+
+        *.bz2)
+            _requireCommand bunzip2 || return 1
+            bunzip2 "$archive"
+            ;;
+
+        *.xz)
+            _requireCommand unxz || return 1
+            unxz "$archive"
+            ;;
+
+        *)
+            echo "ERROR: Unsupported archive type: $archive" >&2
+            echo "USAGE: extract <archive>" >&2
+            return 1
+            ;;
+    esac
+}
+
+_registerUtil \
+    "extract" \
+    "extract <archive>" \
+    "Extract a supported archive based on its file extension." \
+    "Archives"
+
+
+# =============================================================================
+# Git Utilities
+# =============================================================================
+
+gitAddModified() {
+    if [[ $# -ne 0 ]]; then
+        echo "USAGE: gitAddModified" >&2
+        return 1
+    fi
+
+    _requireGitRepo || return 1
+
+    # Git porcelain status format:
+    #
+    #   XY filename
+    #
+    # X = index status
+    # Y = working-tree status
+    #
+    # " M" means modified in the working tree and not yet staged.
+    while IFS= read -r -d '' entry; do
+        if [[ "${entry:0:2}" == " M" ]]; then
+            git add -- "${entry:3}" || return 1
+        fi
+    done < <(git status --porcelain -z)
+}
+
+_registerUtil \
+    "gitAddModified" \
+    "gitAddModified" \
+    "Stage currently unstaged modified files." \
+    "Git"
+
+
+gitAddDeleted() {
+    if [[ $# -ne 0 ]]; then
+        echo "USAGE: gitAddDeleted" >&2
+        return 1
+    fi
+
+    _requireGitRepo || return 1
+
+    # " D" means a tracked file was deleted from the working tree.
+    #
+    # git rm records that deletion in the index.
+    while IFS= read -r -d '' entry; do
+        if [[ "${entry:0:2}" == " D" ]]; then
+            git rm -- "${entry:3}" || return 1
+        fi
+    done < <(git status --porcelain -z)
+}
+
+_registerUtil \
+    "gitAddDeleted" \
+    "gitAddDeleted" \
+    "Stage deletions of tracked files and remove them from the index." \
+    "Git"
+
+
+gitAddUntracked() {
+    if [[ $# -ne 0 ]]; then
+        echo "USAGE: gitAddUntracked" >&2
+        return 1
+    fi
+
+    _requireGitRepo || return 1
+
+    # "??" means the path is currently untracked.
+    while IFS= read -r -d '' entry; do
+        if [[ "${entry:0:2}" == "??" ]]; then
+            git add -- "${entry:3}" || return 1
+        fi
+    done < <(git status --porcelain -z)
+}
+
+_registerUtil \
+    "gitAddUntracked" \
+    "gitAddUntracked" \
+    "Stage currently untracked files." \
+    "Git"
+
+
+gitCommit() {
+    if [[ $# -lt 1 ]]; then
+        echo "USAGE: gitCommit <commit message>" >&2
+        return 1
+    fi
+
+    _requireGitRepo || return 1
+
+    git commit -m "$*"
+}
+
+_registerUtil \
+    "gitCommit" \
+    "gitCommit <commit message>" \
+    "Commit staged changes using all arguments as the commit message." \
+    "Git"
+
+
+gitPushOriginHead() {
+    if [[ $# -ne 0 ]]; then
+        echo "USAGE: gitPushOriginHead" >&2
+        return 1
+    fi
+
+    _requireGitRepo || return 1
+
+    git push origin HEAD
+}
+
+_registerUtil \
+    "gitPushOriginHead" \
+    "gitPushOriginHead" \
+    "Push the current HEAD to origin." \
+    "Git"
+
+
+gitPushCurrent() {
+    if [[ $# -ne 0 ]]; then
+        echo "USAGE: gitPushCurrent" >&2
+        return 1
+    fi
+
+    _requireGitRepo || return 1
+
+    git push -u origin HEAD
+}
+
+_registerUtil \
+    "gitPushCurrent" \
+    "gitPushCurrent" \
+    "Push the current HEAD to origin and establish upstream tracking." \
+    "Git"
+
+
+gitCurrentBranch() {
+    if [[ $# -ne 0 ]]; then
+        echo "USAGE: gitCurrentBranch" >&2
+        return 1
+    fi
+
+    _requireGitRepo || return 1
+
+    git branch --show-current
+}
+
+_registerUtil \
+    "gitCurrentBranch" \
+    "gitCurrentBranch" \
+    "Display the current Git branch." \
+    "Git"
+
+
+gitRoot() {
+    if [[ $# -ne 0 ]]; then
+        echo "USAGE: gitRoot" >&2
+        return 1
+    fi
+
+    _requireGitRepo || return 1
+
+    git rev-parse --show-toplevel
+}
+
+_registerUtil \
+    "gitRoot" \
+    "gitRoot" \
+    "Display the root directory of the current Git repository." \
+    "Git"
+
+
+gitCdRoot() {
+    if [[ $# -ne 0 ]]; then
+        echo "USAGE: gitCdRoot" >&2
+        return 1
+    fi
+
+    _requireGitRepo || return 1
+
+    local root
+
+    root=$(git rev-parse --show-toplevel) || return 1
+
+    cd -- "$root"
+}
+
+_registerUtil \
+    "gitCdRoot" \
+    "gitCdRoot" \
+    "Change directory to the root of the current Git repository." \
+    "Git"
+
+
+gitStatusShort() {
+    if [[ $# -ne 0 ]]; then
+        echo "USAGE: gitStatusShort" >&2
+        return 1
+    fi
+
+    _requireGitRepo || return 1
+
+    git status --short --branch
+}
+
+_registerUtil \
+    "gitStatusShort" \
+    "gitStatusShort" \
+    "Display concise Git branch and working-tree status." \
+    "Git"
+
+
+gitRecent() {
+    if [[ $# -gt 1 ]]; then
+        echo "USAGE: gitRecent [count]" >&2
+        return 1
+    fi
+
+    _requireGitRepo || return 1
+
+    local count="${1:-20}"
+
+    if [[ ! "$count" =~ ^[1-9][0-9]*$ ]]; then
+        echo "ERROR: Count must be a positive integer." >&2
+        echo "USAGE: gitRecent [count]" >&2
+        return 1
+    fi
+
+    git log \
+        --graph \
+        --decorate \
+        --oneline \
+        --all \
+        -"$count"
+}
+
+_registerUtil \
+    "gitRecent" \
+    "gitRecent [count]" \
+    "Display a decorated graph of recent commits; default is 20." \
+    "Git"
+
+
+gitInitPersonal() {
+    if [[ $# -ne 1 ]]; then
+        echo "USAGE: gitInitPersonal <repository-name>" >&2
+        return 1
+    fi
+
+    local repo="$1"
+
+    mkdir -p -- ~/myGit/"$repo" || return 1
+    cd -- ~/myGit/"$repo" || return 1
+
+    git init
+}
+
+_registerUtil \
+    "gitInitPersonal" \
+    "gitInitPersonal <repository-name>" \
+    "Create a repositor in ~/myGit/ and initialize the git repository." \
+    "Git"
