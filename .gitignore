@@ -1,0 +1,10 @@
+# Vim runtime/generated content
+.vim/plugged/
+.vim/backup/
+.vim/swap/
+.vim/undo/
+
+# Vim temporary files
+*.swp
+*.swo
+*~
