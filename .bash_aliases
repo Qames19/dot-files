@@ -21,10 +21,3 @@ alias .6="cd ../../../../../../"
 alias .7="cd ../../../../../../../"
 alias .8="cd ../../../../../../../../"
 alias .9="cd ../../../../../../../../../"
-
-### Python
-alias python="python3.11"
-alias python2="python2.7"
-
-### Windows
-alias winUser="cd /mnt/c/Users/mickj/"
