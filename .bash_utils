@@ -661,24 +661,6 @@ _registerUtil \
     "Git"
 
 
-gitPushOriginHead() {
-    if [[ $# -ne 0 ]]; then
-        echo "USAGE: gitPushOriginHead" >&2
-        return 1
-    fi
-
-    _requireGitRepo || return 1
-
-    git push origin HEAD
-}
-
-_registerUtil \
-    "gitPushOriginHead" \
-    "gitPushOriginHead" \
-    "Push the current HEAD to origin." \
-    "Git"
-
-
 gitPushCurrent() {
     if [[ $# -ne 0 ]]; then
         echo "USAGE: gitPushCurrent" >&2
